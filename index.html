@@ -1,0 +1,1011 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<title>Lakbay - Your Personal Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="manifest" href="manifest.json">
+
+<style>
+* {box-sizing:border-box}
+body {
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#fff;
+  color:#202124;
+}
+button,input,select {font:inherit}
+button {
+  border:0;
+  border-radius:10px;
+  padding:11px 15px;
+  cursor:pointer;
+  background:#16834a;
+  color:white;
+}
+button.secondary {
+  background:#f1f3f4;
+  color:#333;
+}
+button:disabled {opacity:.5}
+input,select {
+  width:100%;
+  padding:12px;
+  border:1px solid #ddd;
+  border-radius:10px;
+  background:white;
+  margin:5px 0 10px;
+}
+header {
+  height:60px;
+  display:flex;
+  align-items:center;
+  padding:0 15px;
+  gap:10px;
+  border-bottom:1px solid #eee;
+  position:relative;
+  z-index:1000;
+  background:white;
+}
+.logo {
+  color:#16834a;
+  font-size:21px;
+  font-weight:bold;
+}
+#map {
+  position:absolute;
+  top:60px;
+  bottom:70px;
+  width:100%;
+  z-index:1;
+}
+.search {
+  position:absolute;
+  z-index:500;
+  top:72px;
+  left:12px;
+  right:12px;
+  background:white;
+  border-radius:13px;
+  box-shadow:0 2px 12px #0002;
+  padding:8px 12px;
+  display:flex;
+  gap:8px;
+}
+.search input {
+  border:0;
+  margin:0;
+  outline:none;
+  min-width:0;
+}
+#panel {
+  position:absolute;
+  z-index:600;
+  bottom:70px;
+  left:0;
+  right:0;
+  max-height:58%;
+  overflow-y:auto;
+  background:white;
+  border-radius:18px 18px 0 0;
+  box-shadow:0 -3px 15px #0002;
+  padding:18px;
+  display:none;
+}
+#panel.show {display:block}
+#panel h3 {margin:0 0 12px}
+.close {
+  float:right;
+  background:#eee;
+  color:#333;
+  padding:5px 10px;
+}
+.nav {
+  position:absolute;
+  z-index:700;
+  bottom:0;
+  width:100%;
+  height:70px;
+  background:white;
+  border-top:1px solid #eee;
+  display:flex;
+  justify-content:space-around;
+  align-items:center;
+}
+.nav button {
+  background:transparent;
+  color:#666;
+  padding:7px 3px;
+  font-size:11px;
+  flex:1;
+}
+.nav button.active {color:#16834a;font-weight:bold}
+.nav span {display:block;font-size:21px;margin-bottom:3px}
+.fab {
+  position:absolute;
+  right:15px;
+  bottom:90px;
+  z-index:500;
+  width:48px;
+  height:48px;
+  border-radius:50%;
+  box-shadow:0 2px 10px #0003;
+  font-size:21px;
+  padding:0;
+}
+.card {
+  border:1px solid #eee;
+  padding:13px;
+  border-radius:13px;
+  margin:10px 0;
+}
+.row {display:flex;gap:8px;align-items:center}
+.row>* {flex:1;min-width:0}
+.small {font-size:12px;color:#777}
+.green {color:#16834a}
+.hidden {display:none!important}
+#status {font-size:12px;color:#16834a}
+#results {font-size:13px}
+.friend {padding:10px;border-bottom:1px solid #eee}
+.route-info {font-size:13px;color:#555;margin:8px 0}
+.chat-answer {
+  background:#f4f7f4;
+  padding:12px;
+  border-radius:12px;
+  line-height:1.5;
+  white-space:pre-wrap;
+}
+@media(min-width:750px) {
+  #panel {width:380px;right:auto;bottom:70px;max-height:70%}
+  .search {right:auto;width:390px}
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="logo">📍 Lakbay</div>
+  <div style="flex:1"></div>
+  <span id="status">Map ready</span>
+  <button class="secondary" onclick="openPanel('account')">👤</button>
+</header>
+
+<div id="map"></div>
+
+<div class="search">
+  <input id="destination" placeholder="Search places in the Philippines...">
+  <button onclick="searchPlace()">🔍</button>
+</div>
+
+<button class="fab" onclick="locateMe()" title="My location">◎</button>
+
+<div id="panel">
+  <button class="close" onclick="closePanel()">✕</button>
+  <div id="panelContent"></div>
+</div>
+
+<nav class="nav">
+  <button class="active" onclick="openPanel('home',this)">
+    <span>🗺️</span>Map
+  </button>
+  <button onclick="openPanel('directions',this)">
+    <span>🧭</span>Routes
+  </button>
+  <button onclick="openPanel('walking',this)">
+    <span>🚶</span>Walk
+  </button>
+  <button onclick="openPanel('friends',this)">
+    <span>👥</span>Friends
+  </button>
+  <button onclick="openPanel('assistant',this)">
+    <span>💬</span>Ask
+  </button>
+</nav>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script type="module">
+
+import {initializeApp} from
+"https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+
+import {
+ getAuth,createUserWithEmailAndPassword,signInWithEmailAndPassword,
+ signOut,onAuthStateChanged
+} from
+"https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+import {
+ getFirestore,doc,setDoc,getDoc,collection,query,where,
+ getDocs,addDoc,onSnapshot,updateDoc,serverTimestamp,deleteDoc
+} from
+"https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+/* ==================================
+   FIREBASE CONFIGURATION
+   ADD YOUR OWN FIREBASE DETAILS HERE
+================================== */
+
+const firebaseConfig = {
+ apiKey: "YOUR_API_KEY",
+ authDomain: "YOUR_PROJECT.firebaseapp.com",
+ projectId: "YOUR_PROJECT_ID",
+ storageBucket: "YOUR_PROJECT.firebasestorage.app",
+ messagingSenderId: "YOUR_SENDER_ID",
+ appId: "YOUR_APP_ID"
+};
+
+let app,auth,db;
+let firebaseReady=false;
+
+try {
+ if(firebaseConfig.apiKey !== "YOUR_API_KEY") {
+   app=initializeApp(firebaseConfig);
+   auth=getAuth(app);
+   db=getFirestore(app);
+   firebaseReady=true;
+ }
+} catch(e) {
+ console.error(e);
+}
+
+/* ==================================
+   MAP
+================================== */
+
+const map=L.map('map').setView([12.8797,121.7740],6);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+ maxZoom:19,
+ attribution:'© OpenStreetMap contributors'
+}).addTo(map);
+
+let myMarker=null;
+let routeLine=null;
+let backtrackLine=null;
+let destinationMarker=null;
+let userPosition=null;
+let routePoints=[];
+let watchId=null;
+
+const savedWalks=JSON.parse(localStorage.getItem('lakbay_walks')||'[]');
+
+function status(message) {
+ document.getElementById('status').textContent=message;
+}
+
+function saveWalks() {
+ localStorage.setItem('lakbay_walks',JSON.stringify(savedWalks));
+}
+
+window.locateMe=function() {
+ if(!navigator.geolocation) {
+   alert('Your browser does not support GPS.');
+   return;
+ }
+ status('Finding your location...');
+ navigator.geolocation.getCurrentPosition(pos=>{
+   userPosition=[pos.coords.latitude,pos.coords.longitude];
+   map.setView(userPosition,17);
+   if(myMarker) map.removeLayer(myMarker);
+   myMarker=L.marker(userPosition).addTo(map)
+     .bindPopup('You are here').openPopup();
+   status('Location found');
+ },e=>alert('Please allow location access. '+e.message),
+ {enableHighAccuracy:true,timeout:20000});
+};
+
+/* ==================================
+   SEARCH PLACES
+================================== */
+
+window.searchPlace=async function() {
+ const term=document.getElementById('destination').value.trim();
+ if(!term) return;
+
+ status('Searching...');
+
+ try {
+  const response=await fetch(
+   'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ph&q='
+   +encodeURIComponent(term)
+  );
+  const results=await response.json();
+
+  if(!results.length) {
+   alert('No places found. Try another search.');
+   status('Map ready');
+   return;
+  }
+
+  const p=results[0];
+  const coords=[Number(p.lat),Number(p.lon)];
+
+  map.setView(coords,16);
+
+  if(destinationMarker) map.removeLayer(destinationMarker);
+  destinationMarker=L.marker(coords).addTo(map)
+    .bindPopup(p.display_name).openPopup();
+
+  document.getElementById('destination').value=p.display_name;
+  status('Place found');
+ } catch(e) {
+  alert('Search failed. Check your internet connection.');
+  status('Map ready');
+ }
+};
+
+/* ==================================
+   ROUTES
+================================== */
+
+async function getRoute(points,profile='walking') {
+ const coordinates=points.map(p=>p[1]+','+p[0]).join(';');
+
+ const response=await fetch(
+  `https://router.project-osrm.org/route/v1/${profile}/${coordinates}?overview=full&geometries=geojson`
+ );
+
+ const data=await response.json();
+ if(data.code!=='Ok') throw new Error('No route available.');
+
+ return data.routes[0];
+}
+
+window.makeRoute=async function(mode) {
+ const destination=document.getElementById('destination').value.trim();
+
+ if(!destination) {
+  alert('Search for a destination first.');
+  return;
+ }
+
+ if(!userPosition) {
+  alert('Please get your current location first.');
+  return;
+ }
+
+ try {
+  const response=await fetch(
+   'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q='
+   +encodeURIComponent(destination)
+  );
+  const places=await response.json();
+  if(!places.length) throw new Error('Destination not found.');
+
+  const end=[Number(places[0].lat),Number(places[0].lon)];
+
+  const profile=mode==='driving'?'driving':'walking';
+  const route=await getRoute([userPosition,end],profile);
+
+  if(routeLine) map.removeLayer(routeLine);
+
+  routeLine=L.geoJSON(route.geometry,{
+   style:{color:'#16834a',weight:6}
+  }).addTo(map);
+
+  map.fitBounds(routeLine.getBounds(),{padding:[40,40]});
+
+  document.getElementById('routeInfo').innerHTML=
+   `<b>${(route.distance/1000).toFixed(2)} km</b> ·
+    Approx. ${Math.round(route.duration/60)} minutes<br>
+    <span class="small">Estimated road route. Traffic and actual travel time may differ.</span>`;
+
+ } catch(e) {
+  alert(e.message);
+ }
+};
+
+/* ==================================
+   PANELS
+================================== */
+
+const content=document.getElementById('panelContent');
+
+window.closePanel=function() {
+ document.getElementById('panel').classList.remove('show');
+};
+
+window.openPanel=function(page,button) {
+ document.getElementById('panel').classList.add('show');
+ document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+ if(button) button.classList.add('active');
+
+ if(page==='home') {
+  content.innerHTML='<h3>Welcome to Lakbay!</h3><p>Search any destination in the Philippines using the search bar.</p><p class="small">Tap the location button to find yourself.</p>';
+ }
+
+ if(page==='directions') {
+  content.innerHTML=`
+   <h3>🧭 Directions</h3>
+   <p>Search your destination using the search bar above.</p>
+   <div class="row">
+    <button onclick="makeRoute('driving')">🚗 Driving</button>
+    <button onclick="makeRoute('walking')">🚶 Walking</button>
+   </div>
+   <div id="routeInfo" class="route-info">Your route information will appear here.</div>
+   <p class="small">Public transport routes and live jeepney schedules are not yet provided by the routing service.</p>`;
+ }
+
+ if(page==='walking') showWalking();
+ if(page==='friends') showFriends();
+ if(page==='assistant') showAssistant();
+ if(page==='account') showAccount();
+};
+
+/* ==================================
+   WALKING TRACKER
+================================== */
+
+let walking=false;
+let walkStart=null;
+let watchWalk=null;
+let steps=0;
+let lastStepTime=0;
+let stepListener=null;
+
+function distance(a,b) {
+ const R=6371000;
+ const rad=x=>x*Math.PI/180;
+ const dLat=rad(b[0]-a[0]);
+ const dLon=rad(b[1]-a[1]);
+ const x=Math.sin(dLat/2)**2+
+  Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*
+  Math.sin(dLon/2)**2;
+ return 2*R*Math.asin(Math.sqrt(x));
+}
+
+function showWalking() {
+ content.innerHTML=`
+  <h3>🚶 Walking Tracker</h3>
+  <div class="card">
+   <div class="row">
+    <div><div class="small">Steps (estimated)</div><h2 id="stepCount">${steps}</h2></div>
+    <div><div class="small">Distance</div><h2 id="walkDistance">0 m</h2></div>
+   </div>
+   <div class="small" id="walkTime">Not walking yet</div>
+  </div>
+  <button id="walkButton" style="width:100%" onclick="toggleWalk()">▶ Start Walking</button>
+  <button class="secondary" style="width:100%;margin-top:8px" onclick="showHistory()">📚 Walking History</button>
+  <p class="small">Keep this page open while tracking. Allow GPS and motion permissions. Step counting depends on your device.</p>
+ `;
+
+ if(walking) {
+  document.getElementById('walkButton').textContent='■ Stop Walking';
+  updateWalkDisplay();
+ }
+}
+
+async function enableMotion() {
+ if(typeof DeviceMotionEvent==='undefined') return;
+
+ if(typeof DeviceMotionEvent.requestPermission==='function') {
+  const result=await DeviceMotionEvent.requestPermission();
+  if(result!=='granted') throw new Error('Motion permission denied.');
+ }
+
+ stepListener=(event)=>{
+  const a=event.accelerationIncludingGravity;
+  if(!a) return;
+  const magnitude=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
+  const now=Date.now();
+  if(magnitude>13 && now-lastStepTime>300) {
+   steps++;
+   lastStepTime=now;
+   const el=document.getElementById('stepCount');
+   if(el) el.textContent=steps;
+  }
+ };
+ window.addEventListener('devicemotion',stepListener);
+}
+
+window.toggleWalk=async function() {
+ if(!walking) {
+  if(!navigator.geolocation) return alert('GPS is not supported.');
+
+  try {
+   if(typeof DeviceMotionEvent!=='undefined') await enableMotion();
+  } catch(e) {
+   alert('Step sensor unavailable. GPS tracking will still work.');
+  }
+
+  walking=true;
+  walkStart=Date.now();
+  steps=0;
+  routePoints=[];
+
+  watchWalk=navigator.geolocation.watchPosition(pos=>{
+   const p=[pos.coords.latitude,pos.coords.longitude];
+
+   if(!routePoints.length ||
+      distance(routePoints[routePoints.length-1],p)>4) {
+    routePoints.push(p);
+   }
+
+   userPosition=p;
+   if(myMarker) myMarker.setLatLng(p);
+   else myMarker=L.marker(p).addTo(map).bindPopup('You');
+
+   updateWalkDisplay();
+  },e=>status('GPS: '+e.message),{
+   enableHighAccuracy:true,
+   maximumAge:1000,
+   timeout:20000
+  });
+
+  document.getElementById('walkButton').textContent='■ Stop Walking';
+  status('Walking tracked');
+  map.locate({setView:false});
+
+ } else {
+  walking=false;
+  navigator.geolocation.clearWatch(watchWalk);
+  if(stepListener) {
+   window.removeEventListener('devicemotion',stepListener);
+   stepListener=null;
+  }
+
+  const walk={
+   date:new Date().toLocaleString(),
+   steps,
+   distance:calculateDistance(routePoints),
+   duration:Date.now()-walkStart,
+   points:routePoints
+  };
+
+  if(walk.points.length>1) {
+   savedWalks.unshift(walk);
+   saveWalks();
+  }
+
+  if(routeLine) map.removeLayer(routeLine);
+  if(routePoints.length>1) {
+   routeLine=L.polyline(routePoints,{color:'#16834a',weight:5}).addTo(map);
+   map.fitBounds(routeLine.getBounds());
+  }
+
+  status('Walk saved');
+  alert('Your walk has been saved!');
+  showWalking();
+ }
+};
+
+function calculateDistance(points) {
+ let total=0;
+ for(let i=1;i<points.length;i++) total+=distance(points[i-1],points[i]);
+ return total;
+}
+
+function updateWalkDisplay() {
+ const dist=calculateDistance(routePoints);
+ const d=document.getElementById('walkDistance');
+ const t=document.getElementById('walkTime');
+
+ if(d) d.textContent=dist>=1000?(dist/1000).toFixed(2)+' km':Math.round(dist)+' m';
+ if(t && walkStart) {
+  const seconds=Math.floor((Date.now()-walkStart)/1000);
+  t.textContent=`Walking for ${Math.floor(seconds/60)} min ${seconds%60} sec`;
+ }
+}
+
+window.showHistory=function() {
+ content.innerHTML='<h3>📚 Walking History</h3>';
+
+ if(!savedWalks.length) {
+  content.innerHTML+='<p>No saved walks yet.</p>';
+  return;
+ }
+
+ savedWalks.forEach((w,i)=>{
+  const card=document.createElement('div');
+  card.className='card';
+  const date=document.createElement('b');
+  date.textContent=w.date;
+  const details=document.createElement('p');
+  details.textContent=`${(w.distance/1000).toFixed(2)} km · ${w.steps} steps · ${Math.round(w.duration/60000)} min`;
+  const view=document.createElement('button');
+  view.textContent='View route';
+  view.onclick=()=>viewWalk(i);
+  const back=document.createElement('button');
+  back.textContent='Backtrack';
+  back.style.marginLeft='5px';
+  back.onclick=()=>backtrack(i);
+  card.append(date,details,view,back);
+  content.appendChild(card);
+ });
+};
+
+window.viewWalk=function(i) {
+ const w=savedWalks[i];
+ if(routeLine) map.removeLayer(routeLine);
+ routeLine=L.polyline(w.points,{color:'#16834a',weight:5}).addTo(map);
+ map.fitBounds(routeLine.getBounds());
+ closePanel();
+};
+
+window.backtrack=async function(i) {
+ const w=savedWalks[i];
+ if(!w.points || w.points.length<2) return alert('Not enough route points.');
+
+ if(backtrackLine) map.removeLayer(backtrackLine);
+
+ // Reverse the recorded path, so it follows the actual
+ // walking trail rather than finding a different road.
+ const reversed=[...w.points].reverse();
+
+ backtrackLine=L.polyline(reversed,{
+  color:'#1976d2',weight:6,dashArray:'8 7'
+ }).addTo(map);
+
+ map.fitBounds(backtrackLine.getBounds());
+
+ const start=reversed[0];
+ L.marker(start).addTo(map).bindPopup('Start your return here').openPopup();
+
+ closePanel();
+ alert('Blue dotted line shows your recorded return path.');
+};
+
+/* ==================================
+   TRANSPORTATION ASSISTANT
+================================== */
+
+function showAssistant() {
+ content.innerHTML=`
+  <h3>💬 Lakbay Assistant</h3>
+  <p>Ask about routes, transportation and fares around the Philippines.</p>
+  <div class="card">
+   <div class="small">Try asking:</div>
+   <button class="secondary" onclick="askQuestion('How do I use the map to find a route?')">How do I find a route?</button>
+   <button class="secondary" onclick="askQuestion('How much is the jeepney fare?')">Jeepney fares</button>
+   <button class="secondary" onclick="askQuestion('How can I find a bus?')">Find a bus</button>
+  </div>
+  <input id="question" placeholder="Ask Lakbay anything...">
+  <button style="width:100%" onclick="askQuestion()">Ask</button>
+  <div id="answer" style="margin-top:12px"></div>
+ `;
+}
+
+window.askQuestion=function(q) {
+ const question=(q||document.getElementById('question')?.value||'').trim();
+ if(!question) return;
+
+ const answer=document.getElementById('answer');
+ const lower=question.toLowerCase();
+
+ let reply='I can help with map searches and walking routes. Try searching for your destination above.';
+
+ if(lower.includes('fare')||lower.includes('price')||lower.includes('cost')) {
+  reply='Jeepney fares depend on the route, vehicle type and applicable fare rules. I do not have a verified live fare database yet, so I will not invent a price. Check the current LTFRB fare guide or ask the local operator. Tell me your starting point and destination to help identify a route.';
+ }
+ else if(lower.includes('jeepney')) {
+  reply='To plan a jeepney trip, tell me your starting location and destination. I can help you organize the trip, but jeepney route coverage and stops need local verification.';
+ }
+ else if(lower.includes('bus')) {
+  reply='Search for your destination on the map first. For bus travel, check the bus operator and terminal for current schedules and fares. This website does not yet have live bus schedules.';
+ }
+ else if(lower.includes('route')||lower.includes('directions')) {
+  reply='Use the search bar to find your destination. Tap Routes below, then choose driving or walking. Public transportation directions are not yet integrated.';
+ }
+ else if(lower.includes('step')) {
+  reply='Open Walk and press Start Walking. Allow GPS and motion permissions. Your walking route and estimated step count will be recorded.';
+ }
+
+ answer.innerHTML='';
+ const bubble=document.createElement('div');
+ bubble.className='chat-answer';
+ bubble.textContent=reply;
+ answer.appendChild(bubble);
+};
+
+/* ==================================
+   ACCOUNT AND FRIENDS
+================================== */
+
+let currentUser=null;
+let friendUnsubscribe=null;
+let locationWatch=null;
+
+function showAccount() {
+ content.innerHTML=`
+  <h3>👤 Your Account</h3>
+  <div id="accountInfo"></div>
+  <div id="authForm">
+   <input id="fullName" placeholder="Your name (for registration)">
+   <input id="email" type="email" placeholder="Email address">
+   <input id="password" type="password" placeholder="Password (6+ characters)">
+   <button style="width:100%" onclick="registerUser()">Create Account</button>
+   <button class="secondary" style="width:100%;margin-top:8px" onclick="loginUser()">Log In</button>
+  </div>
+ `;
+ refreshAccount();
+}
+
+function refreshAccount() {
+ const info=document.getElementById('accountInfo');
+ if(!info) return;
+
+ if(!firebaseReady) {
+  info.innerHTML='<p class="small">Connect Firebase to enable accounts and friend sharing. Map and walking features work without it.</p>';
+  return;
+ }
+
+ if(currentUser) {
+  info.innerHTML=`<p>Signed in as <b></b></p>`;
+  info.querySelector('b').textContent=currentUser.email;
+  document.getElementById('authForm').innerHTML=
+   '<button class="secondary" onclick="logoutUser()">Log out</button>';
+ }
+}
+
+window.registerUser=async function() {
+ if(!firebaseReady) return alert('Firebase is not configured.');
+ const name=document.getElementById('fullName').value.trim();
+ const email=document.getElementById('email').value.trim().toLowerCase();
+ const password=document.getElementById('password').value;
+ if(!name||!email||password.length<6) return alert('Enter your name, email and a password of at least 6 characters.');
+
+ try {
+  const credential=await createUserWithEmailAndPassword(auth,email,password);
+  await setDoc(doc(db,'users',credential.user.uid),{
+   name,email,createdAt:serverTimestamp()
+  });
+  alert('Account created!');
+ } catch(e) {alert(e.message);}
+};
+
+window.loginUser=async function() {
+ if(!firebaseReady) return alert('Firebase is not configured.');
+ try {
+  await signInWithEmailAndPassword(auth,
+   document.getElementById('email').value.trim(),
+   document.getElementById('password').value);
+  alert('Logged in!');
+ } catch(e) {alert(e.message);}
+};
+
+window.logoutUser=async function() {
+ if(locationWatch!==null) navigator.geolocation.clearWatch(locationWatch);
+ if(friendUnsubscribe) friendUnsubscribe();
+ if(firebaseReady) await signOut(auth);
+};
+
+if(firebaseReady) {
+ onAuthStateChanged(auth,async user=>{
+  currentUser=user;
+  if(user) {
+   const ref=doc(db,'users',user.uid);
+   const snap=await getDoc(ref);
+   if(!snap.exists()) await setDoc(ref,{
+    name:user.email.split('@')[0],
+    email:user.email.toLowerCase()
+   });
+  }
+  refreshAccount();
+ });
+}
+
+function requireLogin() {
+ if(!firebaseReady) {
+  alert('Set up Firebase first.');
+  return false;
+ }
+ if(!currentUser) {
+  alert('Please log in first.');
+  openPanel('account');
+  return false;
+ }
+ return true;
+}
+
+function showFriends() {
+ content.innerHTML=`
+  <h3>👥 Friends & Family</h3>
+  <p class="small">Add friends by their registered email address.</p>
+  <input id="friendEmail" type="email" placeholder="Friend's email address">
+  <button style="width:100%" onclick="sendFriendRequest()">Send Friend Request</button>
+  <div class="card">
+   <b>Incoming requests</b>
+   <div id="incoming">Loading...</div>
+  </div>
+  <div class="card">
+   <b>Your friends</b>
+   <div id="friendList">Loading...</div>
+  </div>
+  <div class="card">
+   <b>Location sharing</b>
+   <p class="small">Share your location only with accepted friends. You can stop at any time.</p>
+   <button onclick="toggleSharing()">Start / Stop Sharing</button>
+   <div id="sharingStatus" class="small">Not sharing</div>
+  </div>
+ `;
+
+ loadFriends();
+}
+
+window.sendFriendRequest=async function() {
+ if(!requireLogin()) return;
+ const email=document.getElementById('friendEmail').value.trim().toLowerCase();
+ if(!email||email===currentUser.email.toLowerCase()) return alert('Enter another person's email.');
+
+ try {
+  const users=await getDocs(query(collection(db,'users'),where('email','==',email)));
+  if(users.empty) return alert('No account found with that email.');
+
+  const friend=users.docs[0];
+  if(friend.id===currentUser.uid) return;
+
+  const exists=await getDocs(query(collection(db,'friendRequests'),
+   where('from','==',currentUser.uid),where('to','==',friend.id)));
+  if(!exists.empty) return alert('Request already exists.');
+
+  await addDoc(collection(db,'friendRequests'),{
+   from:currentUser.uid,to:friend.id,status:'pending',
+   createdAt:serverTimestamp()
+  });
+  alert('Friend request sent!');
+ } catch(e) {alert(e.message);}
+};
+
+async function loadFriends() {
+ if(!requireLogin()) {
+  document.getElementById('incoming').textContent='Log in to view requests.';
+  document.getElementById('friendList').textContent='Log in to view friends.';
+  return;
+ }
+
+ try {
+  const incoming=await getDocs(query(collection(db,'friendRequests'),
+   where('to','==',currentUser.uid),where('status','==','pending')));
+
+  const box=document.getElementById('incoming');
+  box.innerHTML='';
+
+  for(const item of incoming.docs) {
+   const req=item.data();
+   const person=await getDoc(doc(db,'users',req.from));
+   if(!person.exists()) continue;
+
+   const row=document.createElement('div');
+   row.className='friend';
+   const label=document.createElement('span');
+   label.textContent=person.data().name+' ('+person.data().email+') ';
+   const accept=document.createElement('button');
+   accept.textContent='Accept';
+   accept.onclick=()=>acceptFriend(item.id);
+   row.append(label,accept);
+   box.appendChild(row);
+  }
+
+  if(!box.children.length) box.textContent='No incoming requests.';
+
+  const friends=await getDocs(query(collection(db,'friendships'),
+   where('members','array-contains',currentUser.uid)));
+
+  const list=document.getElementById('friendList');
+  list.innerHTML='';
+
+  for(const f of friends.docs) {
+   const other=f.data().members.find(id=>id!==currentUser.uid);
+   const person=await getDoc(doc(db,'users',other));
+   if(!person.exists()) continue;
+
+   const row=document.createElement('div');
+   row.className='friend';
+   const label=document.createElement('span');
+   label.textContent=person.data().name+' ('+person.data().email+')';
+   const view=document.createElement('button');
+   view.textContent='View location';
+   view.onclick=()=>viewFriendLocation(other,person.data().name);
+   row.append(label,view);
+   list.appendChild(row);
+  }
+
+  if(!list.children.length) list.textContent='No friends added yet.';
+ } catch(e) {
+  console.error(e);
+  alert('Could not load friends: '+e.message);
+ }
+}
+
+window.acceptFriend=async function(requestId) {
+ if(!requireLogin()) return;
+ try {
+  const ref=doc(db,'friendRequests',requestId);
+  const snap=await getDoc(ref);
+  if(!snap.exists()||snap.data().to!==currentUser.uid) return alert('Request not found.');
+
+  const data=snap.data();
+  if(data.status!=='pending') return;
+
+  const members=[data.from,data.to].sort();
+  const friendshipId=members.join('_');
+
+  await setDoc(doc(db,'friendships',friendshipId),{
+   members,createdAt:serverTimestamp()
+  });
+  await updateDoc(ref,{status:'accepted'});
+  alert('Friend added!');
+  showFriends();
+ } catch(e) {alert(e.message);}
+};
+
+let sharing=false;
+
+window.toggleSharing=async function() {
+ if(!requireLogin()) return;
+
+ if(sharing) {
+  sharing=false;
+  if(locationWatch!==null) navigator.geolocation.clearWatch(locationWatch);
+  locationWatch=null;
+  await deleteDoc(doc(db,'locations',currentUser.uid));
+  document.getElementById('sharingStatus').textContent='Location sharing stopped.';
+  return;
+ }
+
+ if(!navigator.geolocation) return alert('GPS unavailable.');
+
+ const friends=await getDocs(query(collection(db,'friendships'),
+  where('members','array-contains',currentUser.uid)));
+
+ if(friends.empty) return alert('Add friends first.');
+
+ sharing=true;
+ document.getElementById('sharingStatus').textContent='Sharing while this page is open.';
+
+ locationWatch=navigator.geolocation.watchPosition(async pos=>{
+  if(!sharing||!currentUser) return;
+
+  try {
+   await setDoc(doc(db,'locations',currentUser.uid),{
+    lat:pos.coords.latitude,
+    lng:pos.coords.longitude,
+    updatedAt:serverTimestamp()
+   });
+  } catch(e) {console.error(e);}
+ },e=>alert('GPS error: '+e.message),{
+  enableHighAccuracy:true,maximumAge:5000
+ });
+};
+
+window.viewFriendLocation=async function(uid,name) {
+ if(!requireLogin()) return;
+ try {
+  const friendship=await getDocs(query(collection(db,'friendships'),
+   where('members','array-contains',currentUser.uid)));
+
+  if(!friendship.docs.some(f=>f.data().members.includes(uid))) {
+   return alert('This person is not your accepted friend.');
+  }
+
+  const snap=await getDoc(doc(db,'locations',uid));
+  if(!snap.exists()) return alert('This friend is not currently sharing their location.');
+
+  const data=snap.data();
+  const p=[data.lat,data.lng];
+  map.setView(p,17);
+  L.marker(p).addTo(map).bindPopup(name+"'s shared location").openPopup();
+  closePanel();
+ } catch(e) {alert(e.message);}
+};
+
+/* ==================================
+   STARTUP
+================================== */
+
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+ navigator.serviceWorker.register('./sw.js').catch(console.error);
+}
+
+openPanel('home');
+status(firebaseReady?'Connected':'Map ready');
+
+</script>
+</body>
+</html>
