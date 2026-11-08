@@ -1,0 +1,533 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#ffffff">
+<title>Lakbay Maps</title>
+
+<link rel="manifest" href="./manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#202124;background:white}
+button,input{font:inherit}
+button{border:0;border-radius:12px;padding:12px;background:#16834a;color:white;cursor:pointer}
+button.secondary{background:#f1f3f4;color:#333}
+button:disabled{opacity:.5}
+header{height:58px;padding:0 15px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #eee;position:absolute;top:0;width:100%;z-index:500;background:white}
+.logo{font-size:21px;font-weight:bold;color:#16834a}
+#onlineStatus{font-size:11px;color:#777}
+#map{position:absolute;top:58px;bottom:68px;width:100%;background:#e9e8e2;z-index:1}
+.search{position:absolute;z-index:400;top:68px;left:12px;right:12px;background:white;box-shadow:0 2px 10px #0002;border-radius:13px;padding:7px;display:flex;gap:6px}
+.search input{flex:1;min-width:0;border:0;padding:9px;outline:none}
+.search button{padding:10px}
+.fab{position:absolute;z-index:400;right:15px;bottom:88px;border-radius:50%;width:48px;height:48px;font-size:22px;padding:0;box-shadow:0 2px 10px #0003}
+nav{position:absolute;bottom:0;height:68px;width:100%;z-index:700;background:white;border-top:1px solid #eee;display:flex;justify-content:space-around}
+nav button{background:white;color:#666;border-radius:0;flex:1;font-size:11px;padding:6px 0}
+nav button.active{color:#16834a;font-weight:bold}
+nav span{display:block;font-size:21px;margin-bottom:3px}
+#panel{display:none;position:absolute;z-index:600;bottom:68px;left:0;right:0;max-height:65%;overflow-y:auto;background:white;border-radius:18px 18px 0 0;padding:18px;box-shadow:0 -3px 15px #0002}
+#panel.show{display:block}
+.close{float:right;background:#f1f3f4;color:#333;padding:7px 12px}
+h3{margin:2px 0 15px}
+input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;margin:6px 0}
+.card{padding:14px;border:1px solid #eee;border-radius:13px;margin:10px 0}
+.row{display:flex;gap:8px}
+.row>*{flex:1;min-width:0}
+.small{font-size:12px;color:#777;line-height:1.5}
+.stat{font-size:25px;font-weight:bold;margin:6px 0}
+.green{color:#16834a}
+.answer{background:#f3f7f3;padding:13px;border-radius:12px;line-height:1.5;white-space:pre-wrap}
+#mapMessage{position:absolute;z-index:300;bottom:78px;left:12px;background:white;padding:7px 10px;border-radius:8px;font-size:11px;color:#555;box-shadow:0 1px 5px #0002;pointer-events:none}
+@media(min-width:750px){
+ #panel{width:390px;right:auto;bottom:68px;max-height:75%}
+ .search{width:390px;right:auto}
+}
+</style>
+</head>
+
+<body>
+
+<header>
+ <div class="logo">📍 Lakbay</div>
+ <div style="flex:1"></div>
+ <span id="onlineStatus">Checking...</span>
+</header>
+
+<div id="map"></div>
+
+<div class="search">
+ <input id="searchInput" placeholder="Search places in the Philippines">
+ <button onclick="searchPlace()">⌕</button>
+</div>
+
+<div id="mapMessage">Map data needs internet. GPS tracking works offline.</div>
+
+<button class="fab" onclick="locateMe()">◎</button>
+
+<div id="panel">
+ <button class="close" onclick="closePanel()">✕</button>
+ <div id="panelContent"></div>
+</div>
+
+<nav>
+ <button class="active" onclick="openPanel('map',this)"><span>🗺️</span>Map</button>
+ <button onclick="openPanel('routes',this)"><span>🧭</span>Routes</button>
+ <button onclick="openPanel('walk',this)"><span>🚶</span>Walk</button>
+ <button onclick="openPanel('history',this)"><span>📚</span>History</button>
+ <button onclick="openPanel('ask',this)"><span>💬</span>Ask</button>
+</nav>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+/* ==============================
+   LAKBAY MAP
+============================== */
+
+const map=L.map('map').setView([12.8797,121.774],6);
+
+let tiles=null;
+let tileLayer=null;
+
+function setupMap(){
+ if(!window.L){
+  document.getElementById('mapMessage').textContent='Map library unavailable. GPS tracking can still work.';
+  return;
+ }
+ tileLayer=L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {maxZoom:19,attribution:'© OpenStreetMap contributors'}
+ ).addTo(map);
+}
+setupMap();
+
+let myMarker=null;
+let destinationMarker=null;
+let routeLine=null;
+let backLine=null;
+let currentPosition=null;
+
+const $=id=>document.getElementById(id);
+const panel=$('panel');
+const content=$('panelContent');
+
+function status(){
+ $('onlineStatus').textContent=navigator.onLine?'● Online':'● Offline';
+ $('onlineStatus').style.color=navigator.onLine?'#16834a':'#d97706';
+ $('mapMessage').textContent=navigator.onLine?
+ 'Online map · OpenStreetMap':'Offline · Saved walks and GPS still work';
+}
+window.addEventListener('online',status);
+window.addEventListener('offline',status);
+status();
+
+function closePanel(){panel.classList.remove('show')}
+
+function openPanel(page,button){
+ panel.classList.add('show');
+ document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+ if(button)button.classList.add('active');
+
+ if(page==='map'){
+  content.innerHTML='<h3>Welcome to Lakbay! 👋</h3><p>Search a destination or tap the location button to find yourself.</p><p class="small">Your walking records are stored on this device.</p>';
+ }
+ if(page==='routes')showRoutes();
+ if(page==='walk')showWalk();
+ if(page==='history')showHistory();
+ if(page==='ask')showAsk();
+ setTimeout(()=>map.invalidateSize(),200);
+}
+
+/* ==============================
+   GPS
+============================== */
+
+function getGPS(success){
+ if(!navigator.geolocation){
+  alert('GPS is not supported by this browser.');
+  return;
+ }
+ navigator.geolocation.getCurrentPosition(
+  pos=>{
+   currentPosition=[pos.coords.latitude,pos.coords.longitude];
+   if(myMarker)myMarker.setLatLng(currentPosition);
+   else myMarker=L.marker(currentPosition).addTo(map).bindPopup('You are here');
+   success?.(pos);
+  },
+  err=>alert('Could not get GPS. Allow location permission and try again. '+err.message),
+  {enableHighAccuracy:true,timeout:20000,maximumAge:3000}
+ );
+}
+
+function locateMe(){
+ getGPS(()=>{
+  map.setView(currentPosition,17);
+  myMarker.openPopup();
+ });
+}
+
+/* ==============================
+   PLACE SEARCH
+============================== */
+
+async function searchPlace(){
+ const q=$('searchInput').value.trim();
+ if(!q)return;
+ if(!navigator.onLine){
+  alert('New place searches need internet. You can still use saved walks offline.');
+  return;
+ }
+ $('mapMessage').textContent='Searching...';
+ try{
+  const res=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ph&q='+encodeURIComponent(q));
+  const data=await res.json();
+  if(!data.length)throw Error('No place found.');
+  const p=data[0];
+  const coords=[+p.lat,+p.lon];
+  map.setView(coords,16);
+  if(destinationMarker)map.removeLayer(destinationMarker);
+  destinationMarker=L.marker(coords).addTo(map).bindPopup(p.display_name).openPopup();
+  $('mapMessage').textContent='Place found';
+ }catch(e){
+  alert(e.message);
+  status();
+ }
+}
+$('searchInput').addEventListener('keydown',e=>{
+ if(e.key==='Enter')searchPlace();
+});
+
+/* ==============================
+   ROUTES
+============================== */
+
+function showRoutes(){
+ content.innerHTML=`
+ <h3>🧭 Directions</h3>
+ <p>Find your route from your current GPS location.</p>
+ <input id="routeDestination" placeholder="Where do you want to go?">
+ <div class="row">
+  <button onclick="makeRoute('driving')">🚗 Driving</button>
+  <button onclick="makeRoute('walking')">🚶 Walking</button>
+ </div>
+ <div class="card" id="routeResult">Route information appears here.</div>
+ <p class="small">Driving routes are road estimates. This does not yet provide live traffic or verified public transport directions.</p>`;
+}
+
+async function makeRoute(mode){
+ const dest=$('routeDestination').value.trim();
+ if(!dest)return alert('Enter a destination.');
+ if(!navigator.onLine)return alert('Route searches need internet.');
+ getGPS(async()=>{
+  try{
+   const search=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q='+encodeURIComponent(dest));
+   const places=await search.json();
+   if(!places.length)throw Error('Destination not found.');
+   const end=[+places[0].lat,+places[0].lon];
+   const profile=mode==='driving'?'driving':'walking';
+   const url=`https://router.project-osrm.org/route/v1/${profile}/${currentPosition[1]},${currentPosition[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+   const response=await fetch(url);
+   const data=await response.json();
+   if(data.code!=='Ok')throw Error('No route available.');
+   if(routeLine)map.removeLayer(routeLine);
+   routeLine=L.geoJSON(data.routes[0].geometry,{style:{color:'#16834a',weight:6}}).addTo(map);
+   map.fitBounds(routeLine.getBounds(),{padding:[35,35]});
+   $('routeResult').innerHTML=`
+    <b>${(data.routes[0].distance/1000).toFixed(2)} km</b><br>
+    Approximately ${Math.round(data.routes[0].duration/60)} minutes
+    <p class="small">Estimated ${mode} route. Actual time may differ.</p>`;
+  }catch(e){alert(e.message)}
+ });
+}
+
+/* ==============================
+   WALKING TRACKER
+============================== */
+
+let walks=JSON.parse(localStorage.getItem('lakbay_walks')||'[]');
+let active=false;
+let watch=null;
+let points=[];
+let startTime=0;
+let steps=0;
+let lastStep=0;
+let motionHandler=null;
+let timer=null;
+
+function save(){
+ localStorage.setItem('lakbay_walks',JSON.stringify(walks));
+}
+
+function meters(a,b){
+ const rad=x=>x*Math.PI/180;
+ const R=6371000;
+ const d1=rad(b[0]-a[0]);
+ const d2=rad(b[1]-a[1]);
+ const x=Math.sin(d1/2)**2+
+ Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(d2/2)**2;
+ return 2*R*Math.asin(Math.sqrt(x));
+}
+
+function totalDistance(arr){
+ let total=0;
+ for(let i=1;i<arr.length;i++)total+=meters(arr[i-1],arr[i]);
+ return total;
+}
+
+function showWalk(){
+ content.innerHTML=`
+ <h3>🚶 Walking Tracker</h3>
+ <div class="card">
+  <div class="row">
+   <div><div class="small">Estimated steps</div><div class="stat" id="steps">0</div></div>
+   <div><div class="small">Distance</div><div class="stat" id="distance">0 m</div></div>
+  </div>
+  <div class="small" id="duration">Ready to walk</div>
+ </div>
+ <button id="walkToggle" style="width:100%" onclick="toggleWalk()">▶ Start Walking</button>
+ <p class="small">Keep this website open while tracking. GPS works without mobile data. Motion-based steps depend on your phone and browser.</p>
+ <button class="secondary" style="width:100%" onclick="shareCurrent()">📍 Share My Current Location</button>`;
+ if(active){
+  $('walkToggle').textContent='■ Stop Walking';
+  updateDisplay();
+ }
+}
+
+function updateDisplay(){
+ const d=totalDistance(points);
+ const distanceEl=$('distance');
+ const stepsEl=$('steps');
+ const durationEl=$('duration');
+ if(distanceEl)distanceEl.textContent=d>=1000?(d/1000).toFixed(2)+' km':Math.round(d)+' m';
+ if(stepsEl)stepsEl.textContent=steps.toLocaleString();
+ if(durationEl){
+  const sec=Math.floor((Date.now()-startTime)/1000);
+  durationEl.textContent=`${Math.floor(sec/60)} minutes ${sec%60} seconds`;
+ }
+}
+
+async function startMotion(){
+ if(!('DeviceMotionEvent'in window))return;
+ if(typeof DeviceMotionEvent.requestPermission==='function'){
+  const result=await DeviceMotionEvent.requestPermission();
+  if(result!=='granted')return;
+ }
+ let previous=0;
+ motionHandler=e=>{
+  const a=e.accelerationIncludingGravity;
+  if(!a)return;
+  const magnitude=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
+  const now=Date.now();
+  if(magnitude>13 && magnitude-previous>3 && now-lastStep>300){
+   steps++;
+   lastStep=now;
+   const el=$('steps');
+   if(el)el.textContent=steps.toLocaleString();
+  }
+  previous=magnitude;
+ };
+ window.addEventListener('devicemotion',motionHandler);
+}
+
+async function toggleWalk(){
+ if(!active){
+  if(!navigator.geolocation)return alert('GPS unavailable.');
+  try{await startMotion()}catch(e){console.log(e)}
+  active=true;
+  points=[];
+  steps=0;
+  startTime=Date.now();
+
+  watch=navigator.geolocation.watchPosition(pos=>{
+   const p=[pos.coords.latitude,pos.coords.longitude];
+   if(!points.length||meters(points[points.length-1],p)>3){
+    points.push(p);
+   }
+   currentPosition=p;
+   if(myMarker)myMarker.setLatLng(p);
+   else myMarker=L.marker(p).addTo(map).bindPopup('You');
+   if(points.length>1){
+    if(routeLine)map.removeLayer(routeLine);
+    routeLine=L.polyline(points,{color:'#16834a',weight:5}).addTo(map);
+   }
+   updateDisplay();
+  },e=>console.log(e),{
+   enableHighAccuracy:true,maximumAge:1000,timeout:20000
+  });
+
+  $('walkToggle').textContent='■ Stop Walking';
+  timer=setInterval(updateDisplay,1000);
+ }else{
+  stopWalk();
+ }
+}
+
+function stopWalk(){
+ active=false;
+ if(watch!==null)navigator.geolocation.clearWatch(watch);
+ if(timer)clearInterval(timer);
+ if(motionHandler)window.removeEventListener('devicemotion',motionHandler);
+ watch=null;timer=null;motionHandler=null;
+
+ const duration=Date.now()-startTime;
+ if(points.length>1){
+  walks.unshift({
+   date:new Date().toLocaleString(),
+   points,
+   steps,
+   distance:totalDistance(points),
+   duration
+  });
+  save();
+ }
+ alert('Your walking session has been saved on this phone!');
+ showWalk();
+}
+
+/* ==============================
+   WALKING HISTORY & BACKTRACK
+============================== */
+
+function showHistory(){
+ content.innerHTML='<h3>📚 My Walking History</h3>';
+ if(!walks.length){
+  content.innerHTML+='<p>No walks saved yet.</p>';
+  return;
+ }
+
+ walks.forEach((w,i)=>{
+  const card=document.createElement('div');
+  card.className='card';
+  const title=document.createElement('b');
+  title.textContent=w.date;
+  const details=document.createElement('p');
+  details.textContent=`${(w.distance/1000).toFixed(2)} km · ${w.steps} steps · ${Math.round(w.duration/60000)} min`;
+  const row=document.createElement('div');
+  row.className='row';
+  const view=document.createElement('button');
+  view.textContent='View';
+  view.onclick=()=>viewWalk(i);
+  const back=document.createElement('button');
+  back.textContent='Backtrack';
+  back.onclick=()=>backtrack(i);
+  const remove=document.createElement('button');
+  remove.textContent='Delete';
+  remove.className='secondary';
+  remove.onclick=()=>{
+   if(confirm('Delete this walk?')){
+    walks.splice(i,1);save();showHistory();
+   }
+  };
+  row.append(view,back,remove);
+  card.append(title,details,row);
+  content.appendChild(card);
+ });
+}
+
+function viewWalk(i){
+ const w=walks[i];
+ if(!w.points?.length)return;
+ if(routeLine)map.removeLayer(routeLine);
+ routeLine=L.polyline(w.points,{color:'#16834a',weight:5}).addTo(map);
+ map.fitBounds(routeLine.getBounds());
+ closePanel();
+}
+
+function backtrack(i){
+ const w=walks[i];
+ if(!w.points||w.points.length<2)return alert('Not enough saved GPS points.');
+ const reversed=[...w.points].reverse();
+ if(backLine)map.removeLayer(backLine);
+ backLine=L.polyline(reversed,{
+  color:'#1976d2',weight:6,dashArray:'8 7'
+ }).addTo(map);
+ map.fitBounds(backLine.getBounds());
+ L.marker(reversed[0]).addTo(map).bindPopup('Your starting point').openPopup();
+ closePanel();
+ alert('Follow the blue dotted line to retrace your recorded walk.');
+}
+
+/* ==============================
+   LOCATION SHARING
+============================== */
+
+async function shareCurrent(){
+ getGPS(async()=>{
+  const url=`${location.origin}${location.pathname}?lat=${currentPosition[0]}&lng=${currentPosition[1]}`;
+  try{
+   if(navigator.share){
+    await navigator.share({title:'My Lakbay Location',text:'Here is my location:',url});
+   }else{
+    await navigator.clipboard.writeText(url);
+    alert('Location link copied!');
+   }
+  }catch(e){console.log(e)}
+ });
+}
+
+function loadSharedLocation(){
+ const params=new URLSearchParams(location.search);
+ const lat=Number(params.get('lat'));
+ const lng=Number(params.get('lng'));
+ if(Number.isFinite(lat)&&Number.isFinite(lng)&&
+    lat>=-90&&lat<=90&&lng>=-180&&lng<=180&&params.has('lat')&&params.has('lng')){
+  const p=[lat,lng];
+  map.setView(p,16);
+  L.marker(p).addTo(map).bindPopup('Shared location').openPopup();
+ }
+}
+
+/* ==============================
+   TRANSPORTATION HELPER
+============================== */
+
+function showAsk(){
+ content.innerHTML=`
+ <h3>💬 Lakbay Assistant</h3>
+ <p>Ask about transportation, routes and fares.</p>
+ <input id="question" placeholder="Example: How much is a jeepney fare?">
+ <button style="width:100%" onclick="ask()">Ask Lakbay</button>
+ <div id="answer" style="margin-top:12px"></div>
+ <p class="small">Works offline using built-in guidance. It is not a live AI service or verified live fare database.</p>`;
+}
+
+function ask(){
+ const q=$('question').value.trim().toLowerCase();
+ if(!q)return;
+ let answer='Tell me your starting point and destination. You can search places using the map when online.';
+ if(q.includes('fare')||q.includes('price')||q.includes('cost')){
+  answer='Transportation fares depend on the vehicle, route, distance and current government fare rules. I do not have a verified live fare database, so I will not make up prices. Check the latest LTFRB fare guide or ask the operator. Keep any confirmed fares in your own notes.';
+ }else if(q.includes('jeep')){
+  answer='For jeepney trips, identify your starting point and destination, then check the jeepney route and signboard locally. Routes and stops are not yet included in this offline version.';
+ }else if(q.includes('bus')){
+  answer='Check the bus terminal and operator for current schedules, stops and fares. Live bus schedules are not included in this version.';
+ }else if(q.includes('walk')||q.includes('step')){
+  answer='Open Walk and press Start Walking. Allow GPS and motion access. Stop your walk to save the route and estimated steps.';
+ }else if(q.includes('offline')){
+  answer='Your saved walking routes, GPS recording and built-in guidance work offline. New place searches and online road maps need internet.';
+ }
+ $('answer').innerHTML='';
+ const bubble=document.createElement('div');
+ bubble.className='answer';
+ bubble.textContent=answer;
+ $('answer').appendChild(bubble);
+}
+
+/* ==============================
+   OFFLINE SERVICE WORKER
+============================== */
+
+if('serviceWorker'in navigator&&location.protocol.startsWith('http')){
+ navigator.serviceWorker.register('./sw.js')
+ .catch(e=>console.log('Offline setup:',e));
+}
+
+loadSharedLocation();
+openPanel('map');
+</script>
+</body>
+</html>
